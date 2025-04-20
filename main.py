@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify
 import json
 from datetime import datetime, timedelta
 import uuid
+import os
 
 app = Flask(__name__)
 
@@ -66,5 +67,7 @@ def redeem_key():
     save_keys(keys)
     return jsonify({"status": "redeemed", "key": key}), 200
 
+# --- DYNAMIC PORT FIX FOR RENDER ---
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+    port = int(os.environ.get("PORT", 10000))  # Render provides PORT env var
+    app.run(host="0.0.0.0", port=port)
