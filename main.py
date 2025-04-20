@@ -1,11 +1,8 @@
 from flask import Flask, request, jsonify
 import json
 from datetime import datetime, timedelta
-import uuid
-import os
 
 app = Flask(__name__)
-
 KEYS_FILE = "keys.json"
 
 def load_keys():
@@ -67,7 +64,30 @@ def redeem_key():
     save_keys(keys)
     return jsonify({"status": "redeemed", "key": key}), 200
 
-# --- DYNAMIC PORT FIX FOR RENDER ---
+@app.route("/addkey", methods=["POST"])
+def add_key():
+    data = request.json
+    key = data.get("key")
+    key_type = data.get("type")
+
+    if not key or not key_type:
+        return jsonify({"status": "error", "reason": "Missing key or type"}), 400
+
+    keys = load_keys()
+    if any(k["key"] == key for k in keys):
+        return jsonify({"status": "error", "reason": "Key already exists"}), 400
+
+    keys.append({
+        "key": key,
+        "type": key_type,
+        "user_id": None,
+        "hwid": None,
+        "activated": False,
+        "activated_at": None
+    })
+
+    save_keys(keys)
+    return jsonify({"status": "added"}), 200
+
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))  # Render provides PORT env var
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=10000)
