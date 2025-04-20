@@ -1,14 +1,19 @@
 from flask import Flask, request, jsonify
 import json
 from datetime import datetime, timedelta
+import uuid
 import os
 
 app = Flask(__name__)
+
 KEYS_FILE = "keys.json"
 
+# Ensure keys.json exists
+if not os.path.exists(KEYS_FILE):
+    with open(KEYS_FILE, "w") as f:
+        json.dump([], f)
+
 def load_keys():
-    if not os.path.exists(KEYS_FILE):
-        return []
     with open(KEYS_FILE, "r") as f:
         return json.load(f)
 
@@ -23,74 +28,85 @@ def find_key(key):
             return k, keys
     return None, keys
 
-@app.route("/addkey", methods=["POST"])
-def add_key():
-    data = request.json
-    new_key = data.get("key")
-    key_type = data.get("type")
+@app.route("/check", methods=["POST"])
+def check_key():
+    try:
+        data = request.json
+        key = data.get("key")
+        hwid = data.get("hwid")
 
-    if not new_key or not key_type:
-        return jsonify({"status": "error", "reason": "Missing key or type"}), 400
+        found, keys = find_key(key)
+        if not found:
+            return jsonify({"status": "invalid", "reason": "Key not found"}), 404
 
-    keys = load_keys()
-    if any(k["key"] == new_key for k in keys):
-        return jsonify({"status": "error", "reason": "Key already exists"}), 409
+        if found["activated"] and found["hwid"] != hwid:
+            return jsonify({"status": "invalid", "reason": "Key already used on another HWID"}), 403
 
-    keys.append({
-        "key": new_key,
-        "type": key_type,
-        "activated": False,
-        "hwid": None,
-        "activated_at": None
-    })
+        if found["activated"]:
+            activated_at = datetime.fromisoformat(found["activated_at"])
+            if found["type"] == "day":
+                if datetime.now() > activated_at + timedelta(days=1):
+                    return jsonify({"status": "expired"}), 403
+            elif found["type"] == "week":
+                if datetime.now() > activated_at + timedelta(weeks=1):
+                    return jsonify({"status": "expired"}), 403
 
-    save_keys(keys)
-    return jsonify({"status": "added", "key": new_key}), 200
+        return jsonify({"status": "valid"}), 200
+
+    except Exception as e:
+        return jsonify({"status": "error", "reason": str(e)}), 500
 
 @app.route("/redeem", methods=["POST"])
 def redeem_key():
-    data = request.json
-    key = data.get("key")
-    hwid = data.get("hwid")
+    try:
+        data = request.json
+        key = data.get("key")
+        hwid = data.get("hwid")
 
-    found, keys = find_key(key)
-    if not found:
-        return jsonify({"status": "invalid", "reason": "Key not found"}), 404
+        found, keys = find_key(key)
+        if not found:
+            return jsonify({"status": "invalid", "reason": "Key not found"}), 404
 
-    if found["activated"]:
-        return jsonify({"status": "already_activated"}), 403
+        if found["activated"]:
+            return jsonify({"status": "already_activated"}), 403
 
-    found["activated"] = True
-    found["hwid"] = hwid
-    found["activated_at"] = datetime.now().isoformat()
+        found["activated"] = True
+        found["hwid"] = hwid
+        found["activated_at"] = datetime.now().isoformat()
 
-    save_keys(keys)
-    return jsonify({"status": "redeemed", "key": key}), 200
+        save_keys(keys)
+        return jsonify({"status": "redeemed", "key": key}), 200
 
-@app.route("/check", methods=["POST"])
-def check_key():
-    data = request.json
-    key = data.get("key")
-    hwid = data.get("hwid")
+    except Exception as e:
+        return jsonify({"status": "error", "reason": str(e)}), 500
 
-    found, keys = find_key(key)
-    if not found:
-        return jsonify({"status": "invalid", "reason": "Key not found"}), 404
+@app.route("/addkey", methods=["POST"])
+def add_key():
+    try:
+        data = request.json
+        key = data.get("key")
+        key_type = data.get("type")
 
-    if found["hwid"] != hwid:
-        return jsonify({"status": "invalid", "reason": "Key bound to another HWID"}), 403
+        if not key or not key_type:
+            return jsonify({"status": "error", "reason": "Missing key or type"}), 400
 
-    if found["type"] in ["day", "week"] and found["activated_at"]:
-        activated_at = datetime.fromisoformat(found["activated_at"])
-        now = datetime.now()
-        if found["type"] == "day" and now > activated_at + timedelta(days=1):
-            return jsonify({"status": "expired"}), 403
-        elif found["type"] == "week" and now > activated_at + timedelta(weeks=1):
-            return jsonify({"status": "expired"}), 403
+        keys = load_keys()
+        if any(k["key"] == key for k in keys):
+            return jsonify({"status": "error", "reason": "Key already exists"}), 409
 
-    return jsonify({"status": "valid"}), 200
+        keys.append({
+            "key": key,
+            "type": key_type,
+            "activated": False,
+            "hwid": None,
+            "activated_at": None
+        })
 
-# ✅ Fix for Render port binding
+        save_keys(keys)
+        return jsonify({"status": "success", "key": key}), 200
+
+    except Exception as e:
+        return jsonify({"status": "error", "reason": str(e)}), 500
+
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))  # Render uses PORT env variable
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=10000)
